@@ -1,3 +1,10 @@
+import os
+import mysql.connector
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
+from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
+from mysql.connector import Error
+
 # ---------- Flask Setup ----------
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -5,13 +12,6 @@ app.config["UPLOAD_FOLDER"] = os.path.join(os.getcwd(), "uploads")
 
 # Ensure uploads folder exists at startup
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-
-import os
-import mysql.connector
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
-from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
-from mysql.connector import Error
 
 # Only load .env locally (not on Render)
 if os.environ.get("RENDER") is None:  
