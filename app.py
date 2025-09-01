@@ -1,3 +1,11 @@
+# ---------- Flask Setup ----------
+app = Flask(__name__)
+app.secret_key = "supersecretkey"
+app.config["UPLOAD_FOLDER"] = os.path.join(os.getcwd(), "uploads")
+
+# Ensure uploads folder exists at startup
+os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
 import os
 import mysql.connector
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory
@@ -292,6 +300,9 @@ def add_header(response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "-1"
     return response
+
+if not os.path.exists(app.config["UPLOAD_FOLDER"]):
+    os.makedirs(app.config["UPLOAD_FOLDER"])
 
 # ---------- Main ----------
 # if __name__ == "__main__":
