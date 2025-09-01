@@ -4,8 +4,14 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from mysql.connector import Error
-from dotenv import load_dotenv
-load_dotenv()
+
+# Only load .env locally (not on Render)
+if os.environ.get("RENDER") is None:  
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
 # ---------- Flask Setup ----------
 app = Flask(__name__)
