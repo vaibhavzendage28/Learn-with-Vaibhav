@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .login-card {
+    max-width: 400px;
+    margin: auto;
+    margin-top: 80px;
+    padding: 30px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0px 8px 25px rgba(0,0,0,0.15);
+    animation: fadeIn 0.6s ease-in-out;
+  }
+  .login-card h2 {
+    font-weight: bold;
+    color: #2c3e50;
+  }
+  .form-control {
+    border-radius: 10px;
+  }
+  .btn-login {
+    border-radius: 25px;
+    font-size: 1.1rem;
+    padding: 10px;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+
+<div class="login-card">
+  <h2 class="text-center mb-4">🔑 Admin Login</h2>
+
+  <!-- Flash messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        {% if category in ["login", "danger", "success"] %}
+          <div class="alert alert-{{ 'warning' if category=='login' else category }} alert-dismissible fade show text-center" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- Login Form -->
+  <form method="POST">
+    <div class="mb-3">
+      <label for="username" class="form-label">Username</label>
+      <input type="text" class="form-control" name="username" placeholder="Enter admin username" required>
+    </div>
+    <div class="mb-3">
+      <label for="password" class="form-label">Password</label>
+      <input type="password" class="form-control" name="password" placeholder="Enter admin password" required>
+    </div>
+    <button type="submit" class="btn btn-primary w-100 btn-login">Login</button>
+  </form>
+</div>
+
+<!-- Auto-hide flash messages after 3 seconds -->
+<script>
+  setTimeout(() => {
+    let alerts = document.querySelectorAll('.alert');
+    alerts.forEach(alert => {
+      let bsAlert = new bootstrap.Alert(alert);
+      bsAlert.close();
+    });
+  }, 3000);
+</script>
+{% endblock %}

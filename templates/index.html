@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="hero">
+  <h1>Welcome to <span class="text-primary">Learn with Vaibhav 📘</span></h1>
+  <p>Your one-stop place for study resources, notes, and updates.</p>
+
+  <!-- Flash messages (only show home category) -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        {% if category == "home" %}
+          <div class="alert alert-success mt-3 text-center">{{ message }}</div>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% if 'user' in session %}
+    <p class="mt-3">Hello, <strong>{{ session['user'] }}</strong> 👋</p>
+    <a href="/logout" class="btn btn-danger btn-custom">Logout</a>
+  {% else %}
+    <a href="/resources" class="btn btn-primary btn-custom me-2">📂 Explore Resources</a>
+    <a href="/login" class="btn btn-outline-dark btn-custom me-2">Login</a>
+    <a href="/register" class="btn btn-outline-secondary btn-custom">Register</a>
+  {% endif %}
+</div>
+
+<!-- Dashboard Section -->
+<div class="dashboard container">
+  <div class="row g-4 justify-content-center">
+    
+    <!-- Notes -->
+    <!-- {% if 'user' in session %} -->
+    <div class="col-md">
+      <div class="card h-100 text-center p-3">
+        <div class="card-body">
+          <h5 class="card-title">📝 Notes</h5>
+          <p class="card-text">Access subject-wise notes uploaded by Vaibhav.</p>
+          <a href="/notes" class="btn btn-primary">View Notes</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assignments -->
+    <div class="col-md">
+      <div class="card h-100 text-center p-3">
+        <div class="card-body">
+          <h5 class="card-title">📚 Assignments</h5>
+          <p class="card-text">Stay updated with class assignments and practice work.</p>
+          <a href="/assignments" class="btn btn-success">Check Assignments</a>
+        </div>
+      </div>
+    </div>
+    <!-- {% endif %} -->
+
+    <!-- Admin Login (only when no student logged in) -->
+    {% if 'user' not in session %}
+    <div class="col-md">
+      <div class="card h-100 text-center p-3 border-danger">
+        <div class="card-body">
+          <h5 class="card-title">🔑 Admin Panel</h5>
+          <p class="card-text">Restricted access for administrator only.</p>
+          <a href="/admin_login" class="btn btn-danger">Admin Login</a>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+{% endblock %}

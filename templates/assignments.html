@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <h2 class="mb-4 text-success">📚 Assignments</h2>
+
+  {% if assignments %}
+    <div class="accordion" id="assignmentsAccordion">
+      {% set classes = assignments|groupby("class") %}
+      {% for class_name, class_items in classes %}
+        <div class="accordion-item mb-3">
+          <h2 class="accordion-header" id="heading{{ loop.index }}">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                    data-bs-target="#collapseAssign{{ loop.index }}" aria-expanded="false">
+              ✏️ Class {{ class_name }}
+            </button>
+          </h2>
+          <div id="collapseAssign{{ loop.index }}" class="accordion-collapse collapse" data-bs-parent="#assignmentsAccordion">
+            <div class="accordion-body">
+
+              {% set subjects = class_items|groupby("subject") %}
+              {% for subject, subject_items in subjects %}
+                <h5 class="mt-3 text-secondary">📖 {{ subject }}</h5>
+                <div class="row">
+                  {% for assignment in subject_items %}
+                    <div class="col-md-4">
+                      <div class="card shadow-sm border-0 mb-3">
+                        <div class="card-body">
+                          <h6 class="card-title">{{ assignment.title }}</h6>
+                          <a href="{{ url_for('uploaded_file', filename=assignment.file_name) }}" 
+                             class="btn btn-outline-success w-100" download>
+                            ⬇️ Download
+                          </a>
+                        </div>
+                        <div class="card-footer text-muted small text-center">
+                          Uploaded on {{ assignment.uploaded_at.strftime("%d %b %Y") if assignment.uploaded_at else "N/A" }}
+                        </div>
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endfor %}
+
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-muted">⚠️ No assignments available right now.</p>
+  {% endif %}
+</div>
+{% endblock %}
