@@ -8,9 +8,12 @@ from mysql.connector import Error
 # ---------- Flask Setup ----------
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
-app.config["UPLOAD_FOLDER"] = os.path.join(os.getcwd(), "uploads")
 
-# Ensure uploads folder exists at startup
+# Use absolute path instead of os.getcwd()
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+app.config["UPLOAD_FOLDER"] = os.path.join(BASE_DIR, "uploads")
+
+# Ensure uploads folder exists
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 # Only load .env locally (not on Render)
@@ -20,11 +23,6 @@ if os.environ.get("RENDER") is None:
         load_dotenv()
     except ImportError:
         pass
-
-# ---------- Flask Setup ----------
-app = Flask(__name__)
-app.secret_key = "supersecretkey"
-app.config["UPLOAD_FOLDER"] = os.path.join(os.getcwd(), "uploads")
 
 # ---------- MySQL CONFIG ----------
 db_config = {
@@ -77,7 +75,7 @@ def admin_dashboard():
         "total_students": 0,
         "total_notes": 0,
         "total_assignments": 0,
-        "downloads": 0   # needs tracking
+        "downloads": 0
     }
 
     if conn:
@@ -95,7 +93,7 @@ def admin_dashboard():
         cursor.execute("SELECT COUNT(*) AS count FROM materials WHERE type='assignment'")
         stats["total_assignments"] = cursor.fetchone()["count"]
 
-        # Count downloads (optional: requires downloads table)
+        # Count downloads (optional: requires downloads table or column)
         try:
             cursor.execute("SELECT SUM(download_count) AS total FROM materials")
             result = cursor.fetchone()
@@ -129,7 +127,7 @@ def upload():
         subject = request.form["subject"]
         file_type = request.form["type"]
 
-        if file:
+        if file and file.filename:
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(filepath)
@@ -275,9 +273,13 @@ def assignments():
 
     return render_template("assignments.html", assignments=assignments_list)
 
-# --- Serve Uploaded Files ---
+# --- Serve Uploaded Files (Preview) ---
 @app.route("/uploads/<filename>")
 def uploaded_file(filename):
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    if not os.path.exists(filepath):
+        flash("❌ File not found on server!", "home")
+        return redirect(url_for("home"))
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 # --- Download Files ---
@@ -291,6 +293,11 @@ def download(filename):
         cursor.close()
         conn.close()
 
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    if not os.path.exists(filepath):
+        flash("❌ File not found on server!", "home")
+        return redirect(url_for("home"))
+
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename, as_attachment=True)
 
 # ---------- No Cache ----------
@@ -300,12 +307,3 @@ def add_header(response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "-1"
     return response
-
-if not os.path.exists(app.config["UPLOAD_FOLDER"]):
-    os.makedirs(app.config["UPLOAD_FOLDER"])
-
-# ---------- Main ----------
-# if __name__ == "__main__":
-#     if not os.path.exists(app.config["UPLOAD_FOLDER"]):
-#         os.makedirs(app.config["UPLOAD_FOLDER"])
-#     app.run(debug=True)
