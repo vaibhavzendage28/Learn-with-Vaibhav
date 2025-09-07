@@ -2,6 +2,8 @@
 import os
 import io
 import glob
+import logging
+import base64
 import mysql.connector
 from flask import (
     Flask,
@@ -58,6 +60,36 @@ SERVICE_ACCOUNT_CANDIDATES = [
     "credentials.json",
     "drive-service-account.json",
 ]
+
+def ensure_service_account_file():
+    # Option A: JSON raw in env var
+    sa_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+
+    # Option B: base64-encoded JSON stored in env var GCP_SERVICE_ACCOUNT_JSON_B64
+    sa_b64 = os.environ.get("GCP_SERVICE_ACCOUNT_JSON_B64")
+
+    if sa_json:
+        path = "/tmp/service-account.json"
+        with open(path, "w") as f:
+            f.write(sa_json)
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+        return path
+
+    if sa_b64:
+        path = "/tmp/service-account.json"
+        try:
+            data = base64.b64decode(sa_b64)
+            with open(path, "wb") as f:
+                f.write(data)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+            return path
+        except Exception as e:
+            logging.exception("Failed to decode GCP_SERVICE_ACCOUNT_JSON_B64")
+
+    logging.warning("No service account JSON found in environment. Set GCP_SERVICE_ACCOUNT_JSON or GCP_SERVICE_ACCOUNT_JSON_B64.")
+    return None
+
+ensure_service_account_file()
 
 def find_service_account_file():
     for name in SERVICE_ACCOUNT_CANDIDATES:
