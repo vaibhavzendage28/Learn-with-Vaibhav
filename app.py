@@ -4,6 +4,7 @@ import io
 import glob
 import logging
 import base64
+import json
 import mysql.connector
 from flask import (
     Flask,
@@ -18,16 +19,63 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from mysql.connector import Error
 
-# Google Drive API imports
-# pip install google-api-python-client google-auth
+# --- Ensure service account file is available BEFORE importing google libs ---
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+def ensure_service_account_file():
+    """
+    Writes service account JSON from environment into /tmp/service-account.json
+    and sets GOOGLE_APPLICATION_CREDENTIALS so google libraries can find it.
+    Looks for either:
+      - GCP_SERVICE_ACCOUNT_JSON (raw JSON)
+      - GCP_SERVICE_ACCOUNT_JSON_B64 (base64-encoded JSON)
+    Returns the path (or None).
+    """
+    sa_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+    sa_b64 = os.environ.get("GCP_SERVICE_ACCOUNT_JSON_B64")
+    path = "/tmp/service-account.json"
+
+    if sa_json:
+        try:
+            parsed = json.loads(sa_json)  # sanity check
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(parsed))
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+            logging.info("Wrote service account JSON from GCP_SERVICE_ACCOUNT_JSON to %s", path)
+            return path
+        except Exception:
+            logging.exception("GCP_SERVICE_ACCOUNT_JSON present but invalid JSON")
+            return None
+
+    if sa_b64:
+        try:
+            data = base64.b64decode(sa_b64)
+            parsed = json.loads(data)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(parsed))
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+            logging.info("Wrote service account JSON from GCP_SERVICE_ACCOUNT_JSON_B64 to %s", path)
+            return path
+        except Exception:
+            logging.exception("Failed to decode/parse GCP_SERVICE_ACCOUNT_JSON_B64")
+            return None
+
+    # Nothing in env; leave it to file discovery below
+    logging.warning("No service account JSON found in environment. Set GCP_SERVICE_ACCOUNT_JSON or GCP_SERVICE_ACCOUNT_JSON_B64.")
+    return None
+
+# run this early
+ensure_service_account_file()
+
+# --- Now import Google libs (safe because credentials path may exist now) ---
+# pip install google-api-python-client google-auth google-auth-httplib2
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
+# --- Flask app and config ---
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET", "supersecretkey")
-
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 LOCAL_UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(LOCAL_UPLOAD_FOLDER, exist_ok=True)
@@ -61,52 +109,40 @@ SERVICE_ACCOUNT_CANDIDATES = [
     "drive-service-account.json",
 ]
 
-def ensure_service_account_file():
-    # Option A: JSON raw in env var
-    sa_json = os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
-
-    # Option B: base64-encoded JSON stored in env var GCP_SERVICE_ACCOUNT_JSON_B64
-    sa_b64 = os.environ.get("GCP_SERVICE_ACCOUNT_JSON_B64")
-
-    if sa_json:
-        path = "/tmp/service-account.json"
-        with open(path, "w") as f:
-            f.write(sa_json)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
-        return path
-
-    if sa_b64:
-        path = "/tmp/service-account.json"
-        try:
-            data = base64.b64decode(sa_b64)
-            with open(path, "wb") as f:
-                f.write(data)
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
-            return path
-        except Exception as e:
-            logging.exception("Failed to decode GCP_SERVICE_ACCOUNT_JSON_B64")
-
-    logging.warning("No service account JSON found in environment. Set GCP_SERVICE_ACCOUNT_JSON or GCP_SERVICE_ACCOUNT_JSON_B64.")
-    return None
-
-ensure_service_account_file()
-
 def find_service_account_file():
+    """
+    Search for a service-account JSON file:
+      1) If GOOGLE_APPLICATION_CREDENTIALS is set and exists -> use it
+      2) If /tmp/service-account.json exists (written from env) -> use it
+      3) Look for common filenames in project root
+      4) Inspect any .json in project root for service_account/type marker
+    """
+    # 1) explicit env var path
+    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    # 2) /tmp path (written by ensure_service_account_file)
+    tmp_path = "/tmp/service-account.json"
+    if os.path.isfile(tmp_path):
+        return tmp_path
+
+    # 3) common candidate names in project root
     for name in SERVICE_ACCOUNT_CANDIDATES:
         path = os.path.join(BASE_DIR, name)
         if os.path.isfile(path):
             return path
+
+    # 4) inspect other json files for a service_account marker
     for path in glob.glob(os.path.join(BASE_DIR, "*.json")):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read(2000)
-                if '"service_account"' in content or '"type": "service_account"' in content:
+                if '"type": "service_account"' in content or '"client_email"' in content:
                     return path
         except Exception:
             continue
-    env_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if env_path and os.path.isfile(env_path):
-        return env_path
+
     return None
 
 SERVICE_ACCOUNT_FILE = find_service_account_file()
@@ -117,21 +153,24 @@ def init_drive_service():
     global _drive_service
     if _drive_service is not None:
         return _drive_service
-    if not SERVICE_ACCOUNT_FILE:
-        app.logger.warning("No service account JSON file found in project directory.")
-        return None
-    try:
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=DRIVE_SCOPES
-        )
-        service = build("drive", "v3", credentials=creds, cache_discovery=False)
-        _drive_service = service
-        app.logger.info("Google Drive service initialized.")
-        return _drive_service
-    except Exception as e:
-        app.logger.error("Failed to initialize Google Drive service: %s", e)
+
+    # prefer explicit env-provided credentials file
+    sa_file = SERVICE_ACCOUNT_FILE or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not sa_file or not os.path.isfile(sa_file):
+        app.logger.warning("No service account JSON file found in project directory or environment.")
         return None
 
+    try:
+        creds = service_account.Credentials.from_service_account_file(sa_file, scopes=DRIVE_SCOPES)
+        service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        _drive_service = service
+        app.logger.info("Google Drive service initialized with %s", sa_file)
+        return _drive_service
+    except Exception as e:
+        app.logger.exception("Failed to initialize Google Drive service: %s", e)
+        return None
+
+# attempt init early (harmless if fails)
 init_drive_service()
 
 def get_db_connection():
@@ -162,6 +201,7 @@ def upload_file_to_drive(file_storage, filename=None, folder_id=None):
     created = drive.files().create(body=file_metadata, media_body=media, fields="id,webViewLink,webContentLink").execute()
     file_id = created.get("id")
     try:
+        # optional: make publicly readable (only if you want this behavior)
         drive.permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
     except Exception as perm_exc:
         app.logger.warning("Failed to set public permission on Drive file %s: %s", file_id, perm_exc)
@@ -170,6 +210,22 @@ def upload_file_to_drive(file_storage, filename=None, folder_id=None):
         "webViewLink": created.get("webViewLink"),
         "webContentLink": created.get("webContentLink"),
     }
+
+@app.route("/_drive_test")
+def drive_test():
+    """
+    Quick test endpoint to verify Drive API access after deployment.
+    Returns a small list of files (or an error).
+    """
+    try:
+        service = init_drive_service()
+        if not service:
+            return {"ok": False, "error": "Drive service not initialized (no credentials found)."}, 500
+        files = service.files().list(pageSize=5, fields="files(id, name)").execute().get("files", [])
+        return {"ok": True, "sample_files": files}
+    except Exception as e:
+        app.logger.exception("Drive test failed")
+        return {"ok": False, "error": str(e)}, 500
 
 @app.route("/admin_login", methods=["GET", "POST"])
 def admin_login():
