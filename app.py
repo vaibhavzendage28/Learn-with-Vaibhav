@@ -187,6 +187,37 @@ def oauth2callback():
         f"<p>Then restart your service.</p>"
     )
 
+def get_drive_service_oauth():
+    """Build a Drive service using saved refresh token (preferred for user Drive uploads)."""
+    refresh_token = os.getenv("DRIVE_REFRESH_TOKEN")
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+    if not (refresh_token and client_id and client_secret):
+        app.logger.info("OAuth refresh token or client config missing.")
+        return None
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=DRIVE_SCOPES,
+    )
+    try:
+        creds.refresh(Request())  # obtains access token using refresh token
+    except Exception as e:
+        app.logger.exception("Failed to refresh OAuth credentials: %s", e)
+        return None
+
+    try:
+        service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        return service
+    except Exception as e:
+        app.logger.exception("Failed to build Drive service with OAuth credentials: %s", e)
+        return None
+
+
 def find_service_account_file():
     """
     Search for a service-account JSON file:
@@ -259,30 +290,45 @@ def get_db_connection():
         return None
 
 def upload_file_to_drive(file_storage, filename=None, folder_id=None):
-    drive = init_drive_service()
+    # prefer OAuth (uploads into the user Drive)
+    drive = get_drive_service_oauth() or init_drive_service()
     if not drive:
         return None
+
     if not filename:
         filename = secure_filename(file_storage.filename or "unnamed")
     file_metadata = {"name": filename}
     if folder_id:
         file_metadata["parents"] = [folder_id]
+
     try:
         file_storage.stream.seek(0)
     except Exception:
         pass
+
     media = MediaIoBaseUpload(
         file_storage.stream,
         mimetype=(file_storage.mimetype or "application/octet-stream"),
         resumable=True,
     )
-    created = drive.files().create(body=file_metadata, media_body=media, fields="id,webViewLink,webContentLink").execute()
+
+    created = drive.files().create(
+        body=file_metadata,
+        media_body=media,
+        supportsAllDrives=True,   # safe for both My Drive & Shared Drives
+        fields="id,webViewLink,webContentLink"
+    ).execute()
+
     file_id = created.get("id")
     try:
-        # optional: make publicly readable (only if you want this behavior)
-        drive.permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
+        drive.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+            supportsAllDrives=True
+        ).execute()
     except Exception as perm_exc:
         app.logger.warning("Failed to set public permission on Drive file %s: %s", file_id, perm_exc)
+
     return {
         "id": file_id,
         "webViewLink": created.get("webViewLink"),
