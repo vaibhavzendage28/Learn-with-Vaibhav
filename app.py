@@ -6,6 +6,10 @@ import logging
 import base64
 import json
 import mysql.connector
+# new imports for OAuth flow
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from flask import (
     Flask,
     render_template,
@@ -108,6 +112,80 @@ SERVICE_ACCOUNT_CANDIDATES = [
     "credentials.json",
     "drive-service-account.json",
 ]
+
+# ---------- OAuth helper routes (one-time use to get refresh token) ----------
+OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID")
+OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI")  # must match Google Console
+
+def _client_config():
+    """Build client config dict used by google_auth_oauthlib.flow.Flow"""
+    return {
+        "web": {
+            "client_id": OAUTH_CLIENT_ID,
+            "client_secret": OAUTH_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [OAUTH_REDIRECT_URI],
+        }
+    }
+
+@app.route("/oauth2authorize")
+def oauth2authorize():
+    """Redirect user to Google consent screen to obtain refresh token (one-time)."""
+    if not (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET and OAUTH_REDIRECT_URI):
+        return "Missing OAuth client config in environment variables.", 500
+
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=DRIVE_SCOPES,
+        redirect_uri=OAUTH_REDIRECT_URI,
+    )
+    auth_url, state = flow.authorization_url(
+        access_type="offline",       # IMPORTANT: offline gives refresh token
+        include_granted_scopes="true",
+        prompt="consent"            # force showing consent to get refresh token
+    )
+    session["oauth_state"] = state
+    return redirect(auth_url)
+
+@app.route("/oauth2callback")
+def oauth2callback():
+    """Exchange code for tokens and show the refresh token (copy it to Render secrets)."""
+    state = session.get("oauth_state", None)
+    if not state:
+        return "Missing OAuth state in session. Start at /oauth2authorize", 400
+
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=DRIVE_SCOPES,
+        state=state,
+        redirect_uri=OAUTH_REDIRECT_URI,
+    )
+
+    # Exchange the authorization code for credentials
+    flow.fetch_token(authorization_response=request.url)
+    creds = flow.credentials
+
+    refresh_token = getattr(creds, "refresh_token", None)
+    access_token = getattr(creds, "token", None)
+
+    if not refresh_token:
+        return (
+            "No refresh token returned. Make sure you used 'prompt=consent' "
+            "and that you authorized with the same account. If you previously "
+            "authorized, revoke and try again.",
+            400,
+        )
+
+    # IMPORTANT: show the refresh token so you can copy it into Render Secrets
+    # DO NOT keep this page public — once saved in Render, remove these routes or protect them.
+    return (
+        f"<h3>OAuth completed ✅</h3>"
+        f"<p>Copy this refresh token and paste into Render as <b>DRIVE_REFRESH_TOKEN</b> (secret):</p>"
+        f"<pre>{refresh_token}</pre>"
+        f"<p>Then restart your service.</p>"
+    )
 
 def find_service_account_file():
     """
